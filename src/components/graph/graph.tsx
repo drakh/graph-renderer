@@ -1,4 +1,5 @@
 import * as React from 'react';
+import * as d3 from 'd3';
 import DeckGL, {
     COORDINATE_SYSTEM,
     PerspectiveViewport,
@@ -18,7 +19,20 @@ const cameraBaseProps = {
     fov: 75,
     near: 1,
 };
-
+const nodes = [
+    {id: 'a'},
+    {id: 'b'},
+    {id: 'c'},
+    {id: 'd'},
+    {id: 'e'},
+    {id: 'f'},
+    {id: 'i'},
+    {id: 'j'},
+    {id: 'k'},
+    {id: 'l'},
+    {id: 'm'},
+    {id: 'n'},
+];
 const edges = [
     {
         from: 'a',
@@ -32,19 +46,50 @@ const edges = [
         from: 'a',
         to: 'c',
     },
+    {
+        from: 'c',
+        to: 'd',
+    },
+    {
+        from: 'c',
+        to: 'l',
+    },
+    {
+        from: 'c',
+        to: 'm',
+    },
+    {
+        from: 'c',
+        to: 'n',
+    },
+    {
+        from: 'd',
+        to: 'e',
+    },
+    {
+        from: 'd',
+        to: 'd',
+    },
+    {
+        from: 'd',
+        to: 'i',
+    },
+    {
+        from: 'd',
+        to: 'j',
+    },
+    {
+        from: 'd',
+        to: 'k',
+    },
+    {
+        from: 'a',
+        to: 'f',
+    },
 ];
-const pos = {
-    'a': [0, 0, 0],
-    'b': [30, -30, 0],
-    'c': [-30, -30, 0],
-};
+const pos = {};
 const nodeSize = 10;
 const loopRadius = nodeSize * 1.5;
-const col = {
-    'a': [255, 255, 0],
-    'b': [0, 255, 255],
-    'c': [255, 0, 255],
-};
 const lineW = 2;
 
 export interface Props {
@@ -52,6 +97,7 @@ export interface Props {
 }
 
 export interface State {
+    initialised: boolean;
     size: {
         w: number;
         h: number;
@@ -85,36 +131,46 @@ export class Graph extends React.Component<Props, State> {
                 y: 0,
                 z: 250,
             },
+            initialised: false,
         };
     }
 
+    public componentDidMount() {
+        this.makeTree();
+    }
+
     public render() {
-        const {camera, size} = this.state;
-        const layers = [this.createEdgesLayer(), this.createNodesLayer(), this.createPolygonLayer()];
-        const view = new PerspectiveViewport({
-            ...cameraBaseProps,
-            far: (camera.z + 30),
-            eye: [camera.x, camera.y, camera.z],
-            lookAt: [camera.x, camera.y, 0],
-            width: size.w,
-            height: size.h,
-        });
-        return (
-            <div
-                onWheel={(e) => this.onWheel(e)}
-                onMouseDown={(e) => this.startDrag(e)}
-                onMouseUp={(e) => this.endDrag(e)}
-                onMouseMove={(e) => this.drag(e)}
-            >
-                <DeckGL
-                    debug={true}
-                    width={size.w}
-                    height={size.h}
-                    viewport={view}
-                    layers={layers}
-                />
-            </div>
-        );
+        const {camera, size, initialised} = this.state;
+        if (initialised === true) {
+            const layers = [this.createEdgesLayer(), this.createNodesLayer(), this.createPolygonLayer()];
+            const view = new PerspectiveViewport({
+                ...cameraBaseProps,
+                far: (camera.z + 30),
+                eye: [camera.x, camera.y, camera.z],
+                lookAt: [camera.x, camera.y, 0],
+                width: size.w,
+                height: size.h,
+            });
+            return (
+                <div
+                    onWheel={(e) => this.onWheel(e)}
+                    onMouseDown={(e) => this.startDrag(e)}
+                    onMouseUp={(e) => this.endDrag(e)}
+                    onMouseMove={(e) => this.drag(e)}
+                >
+                    <DeckGL
+                        debug={true}
+                        width={size.w}
+                        height={size.h}
+                        viewport={view}
+                        layers={layers}
+                    />
+                </div>
+            );
+        }
+        else {
+            return null;
+        }
     }
 
     private createPolygonLayer(): PolygonLayer {
@@ -149,14 +205,14 @@ export class Graph extends React.Component<Props, State> {
             ...layerBaseConfig,
             autoHighlight: true,
             id: `nodes-layer-`,
-            data: ['a', 'b', 'c'],
+            data: nodes,
             pickable: true,
             radiusMinPixels: nodeSize,
             radiusMaxPixels: nodeSize,
             getRadius: nodeSize,
             highlightColor: [255, 0, 0, 255],
             getPosition: (d) => this.getNodePosition(d),
-            getColor: (d) => this.getNodeColor(d),
+            getColor: [255, 255, 0],
         });
         return layer;
     }
@@ -187,11 +243,7 @@ export class Graph extends React.Component<Props, State> {
     }
 
     private getNodePosition(d) {
-        return pos[d];
-    }
-
-    private getNodeColor(d) {
-        return col[d];
+        return pos[d['id']];
     }
 
     private onWheel(e: React.MouseEvent<HTMLElement>) {
@@ -285,5 +337,34 @@ export class Graph extends React.Component<Props, State> {
             ret.push([x, y]);
         }
         return ret;
+    }
+
+    private makeTree() {
+        const map = nodes.map(node => {
+            const parent = edges.filter(edge => {
+                return edge.to === node.id;
+            });
+            return {
+                id: node.id,
+                parentId: parent.length > 0 ? (parent[0].from !== parent[0].to ? parent[0].from : null) : null,
+            };
+        });
+        const treeData = d3.stratify().id((d) => {
+            return d['id'];
+        }).parentId((d) => {
+            return d['parentId'];
+        })(map);
+        const root = d3.hierarchy(treeData);
+        const layout = d3.tree();
+        layout.nodeSize([nodeSize * 3, nodeSize * 4]);
+        layout(root);
+        const p = root.descendants();
+        p.forEach((n => {
+            pos[n.data.id] = [n['x'], -n['y'], 0];
+        }));
+        this.setState({
+            ...this.state,
+            initialised: true,
+        });
     }
 }
