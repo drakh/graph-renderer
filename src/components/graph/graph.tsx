@@ -1,10 +1,16 @@
 import * as React from 'react';
-// import { BezierCurveLayer } from '@deck.gl/experimental-layers';
-import DeckGL, { COORDINATE_SYSTEM, PerspectiveViewport, ScatterplotLayer, PathLayer } from 'deck.gl';
+import DeckGL, {
+    COORDINATE_SYSTEM,
+    PerspectiveViewport,
+    ScatterplotLayer,
+    PathLayer,
+    PolygonLayer,
+} from 'deck.gl';
 
 const layerBaseConfig = {
     projectionMode: COORDINATE_SYSTEM.IDENTITY,
     coordinateSystem: COORDINATE_SYSTEM.IDENTITY,
+    opacity: 1,
 };
 const cameraBaseProps = {
     focalDistance: 5,
@@ -13,31 +19,33 @@ const cameraBaseProps = {
     near: 1,
 };
 
-const edges = {
-    a: {
+const edges = [
+    {
         from: 'a',
         to: 'a',
     },
-    b: {
+    {
         from: 'a',
         to: 'b',
     },
-    c: {
+    {
         from: 'a',
         to: 'c',
     },
-};
+];
 const pos = {
-    'a': [0, 0],
-    'b': [30, -30],
-    'c': [-30, -30],
+    'a': [0, 0, 0],
+    'b': [30, -30, 0],
+    'c': [-30, -30, 0],
 };
-
+const nodeSize = 10;
+const loopRadius = nodeSize * 1.5;
 const col = {
     'a': [255, 255, 0],
     'b': [0, 255, 255],
     'c': [255, 0, 255],
 };
+const lineW = 2;
 
 export interface Props {
     container: HTMLElement; // preparation nfor window resize events
@@ -82,7 +90,7 @@ export class Graph extends React.Component<Props, State> {
 
     public render() {
         const {camera, size} = this.state;
-        const layers = [this.createEdgesLayer(), this.createNodesLayer()];
+        const layers = [this.createEdgesLayer(), this.createNodesLayer(), this.createPolygonLayer()];
         const view = new PerspectiveViewport({
             ...cameraBaseProps,
             far: (camera.z + 30),
@@ -99,6 +107,7 @@ export class Graph extends React.Component<Props, State> {
                 onMouseMove={(e) => this.drag(e)}
             >
                 <DeckGL
+                    debug={true}
                     width={size.w}
                     height={size.h}
                     viewport={view}
@@ -108,6 +117,33 @@ export class Graph extends React.Component<Props, State> {
         );
     }
 
+    private createPolygonLayer(): PolygonLayer {
+        const layer = new PolygonLayer({
+            ...layerBaseConfig,
+            data: edges,
+            autoHighlight: true,
+            id: `polygon-layer-`,
+            pickable: true,
+            stroked: false,
+            highlightColor: [255, 0, 0, 255],
+            getPolygon: (d) => this.getPolygon(d),
+        });
+        return layer;
+    }
+
+    private getPolygon(edge) {
+        if (edge.to !== edge.from) {
+            const dx = (pos[edge.to][0] - pos[edge.from][0]) / 2;
+            const dy = (pos[edge.to][1] - pos[edge.from][1]) / 2;
+            return this.computeCircle(3, [dx, dy], nodeSize * 0.6, this.computeAngle(edge));
+        }
+        else {
+            const dx = (pos[edge.from][0] - ((loopRadius * 2) - (lineW * 2)));
+            const dy = (pos[edge.from][1] + (loopRadius - (lineW * 2)));
+            return this.computeCircle(3, [dx, dy], nodeSize * 0.6, Math.PI / 2);
+        }
+    }
+
     private createNodesLayer(): ScatterplotLayer {
         const layer = new ScatterplotLayer({
             ...layerBaseConfig,
@@ -115,13 +151,12 @@ export class Graph extends React.Component<Props, State> {
             id: `nodes-layer-`,
             data: ['a', 'b', 'c'],
             pickable: true,
-            radiusScale: 6,
-            radiusMinPixels: 5,
-            radiusMaxPixels: 10,
+            radiusMinPixels: nodeSize,
+            radiusMaxPixels: nodeSize,
+            getRadius: nodeSize,
             highlightColor: [255, 0, 0, 255],
             getPosition: (d) => this.getNodePosition(d),
             getColor: (d) => this.getNodeColor(d),
-            getRadius: () => this.getNodeRadius(),
         });
         return layer;
     }
@@ -131,36 +166,24 @@ export class Graph extends React.Component<Props, State> {
             ...layerBaseConfig,
             autoHighlight: true,
             id: `edges-layer-`,
-            data: ['a', 'b', 'c'],
+            data: edges,
             pickable: true,
-            widthMinPixels: 2,
+            getWidth: lineW,
+            widthMinPixels: lineW,
+            widthMaxPixels: lineW,
             highlightColor: [255, 0, 0, 255],
             getPath: (d) => this.getPath(d),
         });
         return layer;
     }
 
-    private getPath(d) {
-        const edge = edges[d];
-        let ret;
-        if (edge.from !== edge.to) {
-            ret = [pos[edge.from], pos[edge.to]];
-        }
-        else {
-            ret = [
-                pos[edge.from],
-                [pos[edge.from][0] + 20, pos[edge.from][1] - 10],
-                [pos[edge.from][0] + 40, pos[edge.from][1]],
-                [pos[edge.from][0] + 20, pos[edge.from][1] + 10],
-                pos[edge.to],
-            ];
-        }
-        console.info(ret);
+    private getPath(edge) {
+        const ret = (edge.from !== edge.to) ? [pos[edge.from], pos[edge.to]] : this.computeCircle(24, [
+                pos[edge.from][0] - ((loopRadius / 2) + lineW * 2),
+                pos[edge.from][1] + ((loopRadius / 2) + lineW * 2),
+            ],
+            loopRadius);
         return ret;
-    }
-
-    private getNodeRadius() {
-        return 10;
     }
 
     private getNodePosition(d) {
@@ -176,7 +199,6 @@ export class Graph extends React.Component<Props, State> {
         const {camera} = this.state;
         const dz = e.nativeEvent['deltaY'] > 0 ? 50 : -50;
         const z = (camera.z + dz) <= 1 ? 1 : (camera.z + dz);
-        console.info();
         this.setState({
             ...this.state,
             camera: {
@@ -237,5 +259,31 @@ export class Graph extends React.Component<Props, State> {
                 },
             });
         }
+    }
+
+    private computeAngle(edge) {
+        const p1 = {
+            x: pos[edge.from][0],
+            y: pos[edge.from][1],
+        };
+
+        const p2 = {
+            x: pos[edge.to][0],
+            y: pos[edge.to][1],
+        };
+
+        const angleRadians = Math.atan2(p2.y - p1.y, p2.x - p1.x);
+        return angleRadians;
+    }
+
+    private computeCircle(segments = 3, center = [0, 0], radius = nodeSize, _rotate = 0) {
+        const ret = [];
+        const diff = ((2 * Math.PI) / segments);
+        for (let i = 0; i <= segments; i++) {
+            const x = center[0] + radius * Math.sin(((diff * i) + (Math.PI / 2) - _rotate));
+            const y = center[1] + radius * Math.cos((diff * i) + (Math.PI / 2 - _rotate));
+            ret.push([x, y]);
+        }
+        return ret;
     }
 }
