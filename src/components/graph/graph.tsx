@@ -1,6 +1,6 @@
 import * as React from 'react';
 // import { BezierCurveLayer } from '@deck.gl/experimental-layers';
-import DeckGL, { COORDINATE_SYSTEM, PerspectiveViewport, ScatterplotLayer } from 'deck.gl';
+import DeckGL, { COORDINATE_SYSTEM, PerspectiveViewport, ScatterplotLayer, PathLayer } from 'deck.gl';
 
 const layerBaseConfig = {
     projectionMode: COORDINATE_SYSTEM.IDENTITY,
@@ -12,6 +12,21 @@ const cameraBaseProps = {
     fov: 75,
     near: 1,
 };
+
+const edges = {
+    a: {
+        from: 'a',
+        to: 'a',
+    },
+    b: {
+        from: 'a',
+        to: 'b',
+    },
+    c: {
+        from: 'a',
+        to: 'c',
+    },
+};
 const pos = {
     'a': [0, 0],
     'b': [30, -30],
@@ -19,9 +34,9 @@ const pos = {
 };
 
 const col = {
-    'a': [255, 0, 0],
-    'b': [0, 255, 0],
-    'c': [0, 0, 255],
+    'a': [255, 255, 0],
+    'b': [0, 255, 255],
+    'c': [255, 0, 255],
 };
 
 export interface Props {
@@ -67,7 +82,7 @@ export class Graph extends React.Component<Props, State> {
 
     public render() {
         const {camera, size} = this.state;
-        const layers = [this.createNodesLayer()];
+        const layers = [this.createEdgesLayer(), this.createNodesLayer()];
         const view = new PerspectiveViewport({
             ...cameraBaseProps,
             far: (camera.z + 30),
@@ -97,7 +112,7 @@ export class Graph extends React.Component<Props, State> {
         const layer = new ScatterplotLayer({
             ...layerBaseConfig,
             autoHighlight: true,
-            id: `scatterplot-layer-`,
+            id: `nodes-layer-`,
             data: ['a', 'b', 'c'],
             pickable: true,
             radiusScale: 6,
@@ -109,6 +124,39 @@ export class Graph extends React.Component<Props, State> {
             getRadius: () => this.getNodeRadius(),
         });
         return layer;
+    }
+
+    private createEdgesLayer(): PathLayer {
+        const layer = new PathLayer({
+            ...layerBaseConfig,
+            autoHighlight: true,
+            id: `edges-layer-`,
+            data: ['a', 'b', 'c'],
+            pickable: true,
+            widthMinPixels: 2,
+            highlightColor: [255, 0, 0, 255],
+            getPath: (d) => this.getPath(d),
+        });
+        return layer;
+    }
+
+    private getPath(d) {
+        const edge = edges[d];
+        let ret;
+        if (edge.from !== edge.to) {
+            ret = [pos[edge.from], pos[edge.to]];
+        }
+        else {
+            ret = [
+                pos[edge.from],
+                [pos[edge.from][0] + 20, pos[edge.from][1] - 10],
+                [pos[edge.from][0] + 40, pos[edge.from][1]],
+                [pos[edge.from][0] + 20, pos[edge.from][1] + 10],
+                pos[edge.to],
+            ];
+        }
+        console.info(ret);
+        return ret;
     }
 
     private getNodeRadius() {
