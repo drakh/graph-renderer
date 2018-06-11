@@ -1,0 +1,11 @@
+html, body {
+    padding: 0;
+    margin: 0;
+}
+
+.w {
+    position: relative;
+    width: 100vw;
+    height: 100vh;
+    overflow: hidden;
+}

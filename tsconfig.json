@@ -1,0 +1,42 @@
+{
+  "compilerOptions": {
+    "plugins": [
+      {
+        "name": "tslint-language-service"
+      }
+    ],
+    "baseUrl": "./src",
+    "target": "es6",
+    "lib": [
+      "dom",
+      "es2015",
+      "es2017.object",
+      "es2016.array.include"
+    ],
+    "module":"commonjs",
+    "moduleResolution": "node",
+    "skipLibCheck": true,
+    "removeComments": true,
+    "preserveConstEnums": true,
+    "sourceMap": false,
+    "outDir": "build",
+    "rootDir": "src",
+    "jsx": "react",
+    "experimentalDecorators": true,
+    "noUnusedParameters": true,
+    "noUnusedLocals": true,
+    "declaration": false
+  },
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "typingsLocal/**/*"
+  ],
+  "awesomeTypescriptLoaderOptions": {
+    "errorsAsWarnings": true,
+    "useCache": true,
+    "usePrecompiledFiles": true,
+    "isolatedModules": true,
+    "cacheDirectory":".awcache"
+  }
+}
