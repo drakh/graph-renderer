@@ -2,95 +2,33 @@ import * as React from 'react';
 import * as d3 from 'd3';
 import DeckGL, {
     COORDINATE_SYSTEM,
-    PerspectiveViewport,
     ScatterplotLayer,
-    PathLayer,
-    PolygonLayer,
+    IconLayer,
+    OrthographicView,
 } from 'deck.gl';
+import { BezierCurveLayer } from '@deck.gl/experimental-layers';
+import {
+    computeAngle,
+    interpolateQuadraticBezier,
+    interpolateQuadraticBezierAngle,
+} from 'common/utils';
+import { nodes, edges } from 'data/data';
 
 const layerBaseConfig = {
-    projectionMode: COORDINATE_SYSTEM.IDENTITY,
     coordinateSystem: COORDINATE_SYSTEM.IDENTITY,
     opacity: 1,
 };
-const cameraBaseProps = {
-    focalDistance: 5,
-    up: [0, 1, 0],
-    fov: 75,
-    near: 1,
-};
-const nodes = [
-    {id: 'a'},
-    {id: 'b'},
-    {id: 'c'},
-    {id: 'd'},
-    {id: 'e'},
-    {id: 'f'},
-    {id: 'i'},
-    {id: 'j'},
-    {id: 'k'},
-    {id: 'l'},
-    {id: 'm'},
-    {id: 'n'},
-];
-const edges = [
-    {
-        from: 'a',
-        to: 'a',
-    },
-    {
-        from: 'a',
-        to: 'b',
-    },
-    {
-        from: 'a',
-        to: 'c',
-    },
-    {
-        from: 'c',
-        to: 'd',
-    },
-    {
-        from: 'c',
-        to: 'l',
-    },
-    {
-        from: 'c',
-        to: 'm',
-    },
-    {
-        from: 'c',
-        to: 'n',
-    },
-    {
-        from: 'd',
-        to: 'e',
-    },
-    {
-        from: 'd',
-        to: 'd',
-    },
-    {
-        from: 'd',
-        to: 'i',
-    },
-    {
-        from: 'd',
-        to: 'j',
-    },
-    {
-        from: 'd',
-        to: 'k',
-    },
-    {
-        from: 'a',
-        to: 'f',
-    },
-];
-const pos = {};
 const nodeSize = 10;
-const loopRadius = nodeSize * 1.5;
-const lineW = 2;
+
+const iconAtlas = {
+    'marker': {
+        'x': 0,
+        'y': 64,
+        'width': 64,
+        'height': 64,
+        'mask': true,
+    },
+};
 
 export interface Props {
     container: HTMLElement; // preparation nfor window resize events
@@ -99,19 +37,21 @@ export interface Props {
 export interface State {
     initialised: boolean;
     size: {
-        w: number;
-        h: number;
+        width: number;
+        height: number;
     };
-    camera: {
-        x: number,
-        y: number,
-        z: number,
+    offset: {
+        x: number;
+        y: number;
     };
+    currentNode: any;
+    zoom: number;
     dragging: boolean;
     tmpMouse?: {
         x: number,
         y: number,
     };
+    pos: any;
 }
 
 export class Graph extends React.Component<Props, State> {
@@ -120,18 +60,21 @@ export class Graph extends React.Component<Props, State> {
         const {container} = this.props;
         const height = container.offsetHeight;
         const width = container.offsetWidth;
+
         this.state = {
+            currentNode: null,
             dragging: false,
-            size: {
-                w: width,
-                h: height,
-            },
-            camera: {
+            offset: {
                 x: 0,
                 y: 0,
-                z: 250,
+            },
+            size: {
+                width: width,
+                height: height,
             },
             initialised: false,
+            zoom: 2,
+            pos: {},
         };
     }
 
@@ -140,17 +83,18 @@ export class Graph extends React.Component<Props, State> {
     }
 
     public render() {
-        const {camera, size, initialised} = this.state;
+        const {offset: {x, y}, size: {width, height}, zoom, initialised} = this.state;
         if (initialised === true) {
-            const layers = [this.createEdgesLayer(), this.createNodesLayer(), this.createPolygonLayer()];
-            const view = new PerspectiveViewport({
-                ...cameraBaseProps,
-                far: (camera.z + 30),
-                eye: [camera.x, camera.y, camera.z],
-                lookAt: [camera.x, camera.y, 0],
-                width: size.w,
-                height: size.h,
-            });
+            const layers = [this.createEdgesLayer(), this.createNodesLayer(), this.createArrowLayer()];
+            const vOpt = {
+                left: (-width / zoom) + x / zoom,
+                top: (-height / zoom) + y / zoom,
+                right: (width / zoom) + x / zoom,
+                bottom: (height / zoom) + y / zoom,
+                near: 0,
+                far: 100,
+            };
+            const view = new OrthographicView(vOpt);
             return (
                 <div
                     onWheel={(e) => this.onWheel(e)}
@@ -160,9 +104,9 @@ export class Graph extends React.Component<Props, State> {
                 >
                     <DeckGL
                         debug={true}
-                        width={size.w}
-                        height={size.h}
-                        viewport={view}
+                        width={width}
+                        height={height}
+                        views={view}
                         layers={layers}
                     />
                 </div>
@@ -173,91 +117,174 @@ export class Graph extends React.Component<Props, State> {
         }
     }
 
-    private createPolygonLayer(): PolygonLayer {
-        const layer = new PolygonLayer({
+    private createEdgesLayer(): BezierCurveLayer {
+        const sourcePositions = edges.map(edge => {
+            return this.getEdgeStart(edge);
+        });
+        const targetPositions = edges.map(edge => {
+            return this.getEdgeEnd(edge);
+        });
+        const midPositions = edges.map(edge => {
+            return this.getEdgeMid(edge);
+        });
+        const layer = new BezierCurveLayer({
             ...layerBaseConfig,
+            id: 'curve-layer',
             data: edges,
-            autoHighlight: true,
-            id: `polygon-layer-`,
+            getSourcePosition: d => this.getEdgeStart(d),
+            getTargetPosition: d => this.getEdgeEnd(d),
+            getControlPoint: d => this.getEdgeMid(d),
+            getColor: (_e) => {
+                return [150, 150, 150, 255];
+            },
+            updateTriggers: {
+                getSourcePosition: sourcePositions,
+                getTargetPosition: targetPositions,
+                getControlPoint: midPositions,
+            },
+            strokeWidth: 10,
             pickable: true,
-            stroked: false,
+            autoHighlight: true,
             highlightColor: [255, 0, 0, 255],
-            getPolygon: (d) => this.getPolygon(d),
         });
         return layer;
     }
 
-    private getPolygon(edge) {
-        if (edge.to !== edge.from) {
-            const dx = (pos[edge.to][0] - pos[edge.from][0]) / 2;
-            const dy = (pos[edge.to][1] - pos[edge.from][1]) / 2;
-            return this.computeCircle(3, [dx, dy], nodeSize * 0.6, this.computeAngle(edge));
-        }
-        else {
-            const dx = (pos[edge.from][0] - ((loopRadius * 2) - (lineW * 2)));
-            const dy = (pos[edge.from][1] + (loopRadius - (lineW * 2)));
-            return this.computeCircle(3, [dx, dy], nodeSize * 0.6, Math.PI / 2);
-        }
-    }
-
     private createNodesLayer(): ScatterplotLayer {
+        const {pos} = this.state;
+
+        const positions = nodes.map(node => {
+            return pos[node.id];
+        });
         const layer = new ScatterplotLayer({
             ...layerBaseConfig,
             autoHighlight: true,
             id: `nodes-layer-`,
             data: nodes,
             pickable: true,
-            radiusMinPixels: nodeSize,
-            radiusMaxPixels: nodeSize,
-            getRadius: nodeSize,
+            radiusScale: 1,
+            radiusMinPixels: 10,
+            radiusMaxPixels: 10,
+            getRadius: 10,
+            updateTriggers: {
+                getPosition: positions,
+            },
             highlightColor: [255, 0, 0, 255],
             getPosition: (d) => this.getNodePosition(d),
+            onHover: (e) => this.onNodeOver(e),
             getColor: [255, 255, 0],
         });
         return layer;
     }
 
-    private createEdgesLayer(): PathLayer {
-        const layer = new PathLayer({
+    private onNodeOver(e) {
+        if (e.picked) {
+            this.setState({
+                ...this.state,
+                currentNode: nodes[e.index],
+            });
+        }
+        else {
+            this.setState({
+                ...this.state,
+                currentNode: null,
+            });
+        }
+    }
+
+    private createArrowLayer(): IconLayer {
+        const positions = edges.map(edge => {
+            return this.getArrowPos(edge);
+        });
+        const angles = edges.map(edge => {
+            return this.geArrowAngle(edge);
+        });
+        const layer = new IconLayer({
             ...layerBaseConfig,
+            iconAtlas: '/static/images/icon-atlas.png',
+            iconMapping: iconAtlas,
+            sizeScale: 4,
+            getIcon: () => {
+                return 'marker';
+            },
             autoHighlight: true,
-            id: `edges-layer-`,
-            data: edges,
             pickable: true,
-            getWidth: lineW,
-            widthMinPixels: lineW,
-            widthMaxPixels: lineW,
-            highlightColor: [255, 0, 0, 255],
-            getPath: (d) => this.getPath(d),
+            id: `arrow-layer`,
+            data: edges,
+            getPosition: (d) => this.getArrowPos(d),
+            getAngle: (d) => this.geArrowAngle(d),
+            updateTriggers: {
+                getPosition: positions,
+                getAngle: angles,
+            },
+            getSize: 20,
+            getColor: [255, 0, 0],
         });
         return layer;
     }
 
-    private getPath(edge) {
-        const ret = (edge.from !== edge.to) ? [pos[edge.from], pos[edge.to]] : this.computeCircle(24, [
-                pos[edge.from][0] - ((loopRadius / 2) + lineW * 2),
-                pos[edge.from][1] + ((loopRadius / 2) + lineW * 2),
-            ],
-            loopRadius);
+    private geArrowAngle(edge) {
+        const start = this.getEdgeStart(edge);
+        const control = this.getEdgeMid(edge);
+        const end = this.getEdgeEnd(edge);
+        const interploator = interpolateQuadraticBezierAngle(start, control, end);
+        const ang = interploator(0.5);
+        return -ang;
+    }
+
+    private getArrowPos(edge) {
+        const start = this.getEdgeStart(edge);
+        const control = this.getEdgeMid(edge);
+        const end = this.getEdgeEnd(edge);
+        const interploator = interpolateQuadraticBezier(start, control, end);
+        const pos = interploator(0.5);
+        return [...pos, 0];
+    }
+
+    private getEdgeStart(edge) {
+        const {pos} = this.state;
+        return pos[edge.from];
+    }
+
+    private getEdgeMid(edge) {
+        const {pos} = this.state;
+        const source = pos[edge.from];
+        const target = edge.from === edge.to ? [pos[edge.to][0] + 100, pos[edge.to][1] - 100] : pos[edge.to];
+        const direction = source[0] > target[0] ? 1 : -1;
+        const ang = (computeAngle(source, target) - 90) / (180 * Math.PI);
+        const offset = ang * 50;
+        const midPoint = [(source[0] + target[0]) / 2, (source[1] + target[1]) / 2];
+        const dx = target[0] - source[0];
+        const dy = target[1] - source[1];
+        const normal = [dy, -dx];
+        const length = Math.sqrt(Math.pow(normal[0], 2.0) + Math.pow(normal[1], 2.0));
+        const normalized = [normal[0] / length, normal[1] / length];
+        const ret = [
+            midPoint[0] + normalized[0] * offset * direction || 0,
+            midPoint[1] + normalized[1] * offset * direction || 0,
+            0,
+        ];
         return ret;
     }
 
+    private getEdgeEnd(edge) {
+        const {pos} = this.state;
+        return pos[edge.to];
+    }
+
     private getNodePosition(d) {
+        const {pos} = this.state;
         return pos[d['id']];
     }
 
     private onWheel(e: React.MouseEvent<HTMLElement>) {
         e.preventDefault();
-        const {camera} = this.state;
-        const dz = e.nativeEvent['deltaY'] > 0 ? 50 : -50;
-        const z = (camera.z + dz) <= 1 ? 1 : (camera.z + dz);
+        const {zoom} = this.state;
+        const dz = e.nativeEvent['deltaY'] > 0 ? -1 : 1;
+        const z = zoom + (dz * 0.2);
         this.setState({
             ...this.state,
-            camera: {
-                x: camera.x,
-                y: camera.y,
-                z: z,
-            },
+            zoom: z >= 0.1 ? z : 0.1,
         });
     }
 
@@ -282,64 +309,48 @@ export class Graph extends React.Component<Props, State> {
     }
 
     private drag(e: React.MouseEvent<HTMLElement>) {
-        const {dragging} = this.state;
+        /**
+         * TODO
+         *
+         * fix ratios when moving
+         */
+        const {dragging, currentNode} = this.state;
         if (dragging) {
             e.preventDefault();
-            const {tmpMouse: {x, y}, camera, size} = this.state;
-            const view = new PerspectiveViewport({
-                ...cameraBaseProps,
-                far: (camera.z + 30),
-                eye: [camera.x, camera.y, camera.z],
-                lookAt: [camera.x, camera.y, 0],
-                width: size.w,
-                height: size.h,
-            });
-            const oP = view.unproject([x, y]);
-            const nP = view.unproject([e.screenX, e.screenY]);
-            const dx = oP[0] - nP[0];
-            const dy = oP[1] - nP[1];
-            this.setState({
-                ...this.state,
-                camera: {
-                    x: camera.x + dx,
-                    y: camera.y + dy,
-                    z: camera.z,
-                },
-                tmpMouse: {
-                    x: e.screenX,
-                    y: e.screenY,
-                },
-            });
+            const {tmpMouse: {x, y}, offset, pos} = this.state;
+            const dx = (x - e.screenX);
+            const dy = (y - e.screenY);
+            if (!currentNode) {
+                this.setState({
+                    ...this.state,
+                    offset: {
+                        x: offset.x + dx,
+                        y: offset.y + dy,
+                    },
+                    tmpMouse: {
+                        x: e.screenX,
+                        y: e.screenY,
+                    },
+                });
+            }
+            else {
+                const nodePos = pos[currentNode.id];
+                const newPos = [(nodePos[0] - dx), (nodePos[1] - dy), 0];
+                pos[currentNode.id] = newPos;
+                this.setState({
+                    ...this.state,
+                    pos: {...pos},
+                    tmpMouse: {
+                        x: e.screenX,
+                        y: e.screenY,
+                    },
+                });
+            }
         }
-    }
-
-    private computeAngle(edge) {
-        const p1 = {
-            x: pos[edge.from][0],
-            y: pos[edge.from][1],
-        };
-
-        const p2 = {
-            x: pos[edge.to][0],
-            y: pos[edge.to][1],
-        };
-
-        const angleRadians = Math.atan2(p2.y - p1.y, p2.x - p1.x);
-        return angleRadians;
-    }
-
-    private computeCircle(segments = 3, center = [0, 0], radius = nodeSize, _rotate = 0) {
-        const ret = [];
-        const diff = ((2 * Math.PI) / segments);
-        for (let i = 0; i <= segments; i++) {
-            const x = center[0] + radius * Math.sin(((diff * i) + (Math.PI / 2) - _rotate));
-            const y = center[1] + radius * Math.cos((diff * i) + (Math.PI / 2 - _rotate));
-            ret.push([x, y]);
-        }
-        return ret;
     }
 
     private makeTree() {
+        const {pos} = this.state;
         const map = nodes.map(node => {
             const parent = edges.filter(edge => {
                 return edge.to === node.id;
@@ -356,15 +367,16 @@ export class Graph extends React.Component<Props, State> {
         })(map);
         const root = d3.hierarchy(treeData);
         const layout = d3.tree();
-        layout.nodeSize([nodeSize * 3, nodeSize * 4]);
+        layout.nodeSize([nodeSize * 5, nodeSize * 5]);
         layout(root);
         const p = root.descendants();
         p.forEach((n => {
-            pos[n.data.id] = [n['x'], -n['y'], 0];
+            pos[n.data.id] = [n['x'], n['y'], 0];
         }));
         this.setState({
             ...this.state,
             initialised: true,
+            pos: pos,
         });
     }
 }
