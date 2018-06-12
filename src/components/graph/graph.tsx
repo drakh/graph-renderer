@@ -1,24 +1,16 @@
 import * as React from 'react';
 import * as d3 from 'd3';
-import DeckGL, {
-    COORDINATE_SYSTEM,
-    ScatterplotLayer,
-    IconLayer,
-    OrthographicView,
-} from 'deck.gl';
+import DeckGL, { COORDINATE_SYSTEM, ScatterplotLayer, IconLayer, OrthographicView } from 'deck.gl';
 import { BezierCurveLayer } from '@deck.gl/experimental-layers';
-import {
-    interpolateQuadraticBezier,
-    interpolateQuadraticBezierAngle,
-} from 'common/utils';
-import { nodes, edges } from 'data/data';
+import { NodeItem, NodeLink } from 'common/types';
+import { interpolateQuadraticBezier, interpolateQuadraticBezierAngle } from 'common/utils';
 
 const layerBaseConfig = {
     coordinateSystem: COORDINATE_SYSTEM.IDENTITY,
     opacity: 1,
 };
 const nodeSize = 10;
-
+const loopSize = 20;
 const iconAtlas = {
     'marker': {
         'x': 0,
@@ -29,8 +21,17 @@ const iconAtlas = {
     },
 };
 
+interface Line {
+    from: number[];
+    to: number[];
+}
+
+type PosMap = Map<string, number[]>;
+
 export interface Props {
     container: HTMLElement; // preparation nfor window resize events
+    nodes: NodeItem[];
+    edges: NodeLink[];
 }
 
 export interface State {
@@ -50,7 +51,11 @@ export interface State {
         x: number,
         y: number,
     };
-    pos: any;
+    pos: PosMap;
+    graphEdges: NodeLink[];
+    graphLoops: NodeLink[];
+    loops: Line[];
+    lines: Line[];
 }
 
 export class Graph extends React.Component<Props, State> {
@@ -73,18 +78,30 @@ export class Graph extends React.Component<Props, State> {
             },
             initialised: false,
             zoom: 3,
-            pos: {},
+            pos: new Map<string, number[]>(),
+            graphEdges: [],
+            graphLoops: [],
+            loops: [],
+            lines: [],
         };
     }
 
     public componentDidMount() {
-        this.makeTree();
+        this.makeTree(this.props.nodes, this.props.edges);
     }
 
     public render() {
-        const {offset: {x, y}, size: {width, height}, zoom, initialised} = this.state;
+        const {lines, loops, pos, offset: {x, y}, size: {width, height}, zoom, initialised} = this.state;
+        console.info(pos.get('a'));
+        const {nodes} = this.props;
         if (initialised === true) {
-            const layers = [this.createEdgesLayer(), this.createNodesLayer(), this.createArrowLayer()];
+            const layers = [
+                this.createEdgesLayer(lines),
+                this.createEdgesLayer(loops, 'loops'),
+                this.createArrowLayer(lines),
+                this.createArrowLayer(loops, 'loops'),
+                this.createNodesLayer(nodes, pos),
+            ];
             const left = ((-width / 2) + x);
             const top = ((-height / 2) + y);
             const vOpt = {
@@ -96,10 +113,6 @@ export class Graph extends React.Component<Props, State> {
                 height: height,
                 near: 0,
                 far: 1000,
-            };
-            const viewState = {
-                eye: [0, 0, 1],
-                lookAt: [0, 0, 0],
             };
             const view = new OrthographicView(vOpt);
             return (
@@ -115,7 +128,6 @@ export class Graph extends React.Component<Props, State> {
                         height={height}
                         views={view}
                         layers={layers}
-                        viewState={viewState}
                     />
                 </div>
             );
@@ -125,20 +137,20 @@ export class Graph extends React.Component<Props, State> {
         }
     }
 
-    private createEdgesLayer(): BezierCurveLayer {
-        const sourcePositions = edges.map(edge => {
+    private createEdgesLayer(lines: Line[], id = 'base'): BezierCurveLayer {
+        const sourcePositions = lines.map(edge => {
             return this.getEdgeStart(edge);
         });
-        const targetPositions = edges.map(edge => {
+        const targetPositions = lines.map(edge => {
             return this.getEdgeEnd(edge);
         });
-        const midPositions = edges.map(edge => {
+        const midPositions = lines.map(edge => {
             return this.getEdgeMid(edge);
         });
         const layer = new BezierCurveLayer({
             ...layerBaseConfig,
-            id: 'curve-layer',
-            data: edges,
+            id: `curve-layer-${id}`,
+            data: lines,
             getSourcePosition: d => this.getEdgeStart(d),
             getTargetPosition: d => this.getEdgeEnd(d),
             getControlPoint: d => this.getEdgeMid(d),
@@ -158,11 +170,9 @@ export class Graph extends React.Component<Props, State> {
         return layer;
     }
 
-    private createNodesLayer(): ScatterplotLayer {
-        const {pos} = this.state;
-
+    private createNodesLayer(nodes: NodeItem[], pos: PosMap): ScatterplotLayer {
         const positions = nodes.map(node => {
-            return pos[node.id];
+            return pos.get(node.id);
         });
         const layer = new ScatterplotLayer({
             ...layerBaseConfig,
@@ -187,6 +197,7 @@ export class Graph extends React.Component<Props, State> {
 
     private onNodeOver(e) {
         if (e.picked) {
+            const {nodes} = this.props;
             this.setState({
                 ...this.state,
                 currentNode: nodes[e.index],
@@ -200,11 +211,11 @@ export class Graph extends React.Component<Props, State> {
         }
     }
 
-    private createArrowLayer(): IconLayer {
-        const positions = edges.map(edge => {
+    private createArrowLayer(lines: Line[], id = 'base'): IconLayer {
+        const positions = lines.map(edge => {
             return this.getArrowPos(edge);
         });
-        const angles = edges.map(edge => {
+        const angles = lines.map(edge => {
             return this.geArrowAngle(edge);
         });
         const layer = new IconLayer({
@@ -217,8 +228,8 @@ export class Graph extends React.Component<Props, State> {
             },
             autoHighlight: true,
             pickable: true,
-            id: `arrow-layer`,
-            data: edges,
+            id: `arrow-layer-${id}`,
+            data: lines,
             getPosition: (d) => this.getArrowPos(d),
             getAngle: (d) => this.geArrowAngle(d),
             updateTriggers: {
@@ -231,7 +242,7 @@ export class Graph extends React.Component<Props, State> {
         return layer;
     }
 
-    private geArrowAngle(edge) {
+    private geArrowAngle(edge: Line) {
         const start = this.getEdgeStart(edge);
         const control = this.getEdgeMid(edge);
         const end = this.getEdgeEnd(edge);
@@ -240,7 +251,7 @@ export class Graph extends React.Component<Props, State> {
         return -ang;
     }
 
-    private getArrowPos(edge) {
+    private getArrowPos(edge: Line) {
         const start = this.getEdgeStart(edge);
         const control = this.getEdgeMid(edge);
         const end = this.getEdgeEnd(edge);
@@ -249,33 +260,34 @@ export class Graph extends React.Component<Props, State> {
         return [...pos, 0];
     }
 
-    private getEdgeStart(edge) {
-        const {pos} = this.state;
-        return pos[edge.from];
+    private getEdgeStart(edge: Line) {
+        return edge.from;
     }
 
-    private getEdgeMid(edge) {
-        const {pos} = this.state;
-        const source = pos[edge.from];
-        const target = edge.from === edge.to ? [pos[edge.to][0] + 50, pos[edge.to][1] - 50, 0] : pos[edge.to];
+    private getEdgeMid(edge: Line) {
+        const source = edge.from;
+        const target = edge.to;
         const dx = (target[0] - source[0]);
         const dy = (target[1] - source[1]);
         const adx = Math.abs(dx);
         const ady = Math.abs(dy);
-        const ax = (adx / 5) * (dx / adx);
-        const ay = (ady / 5) * (dy / ady);
+        const ax = (adx / 5) * (dx / adx) || 0;
+        const ay = (ady / 5) * (dy / ady) || 0;
         const ret = [(adx > ady ? target[0] - ax : source[0] + ax), (adx > ady ? source[1] + ay : target[1] - ay), 0];
         return ret;
     }
 
-    private getEdgeEnd(edge) {
-        const {pos} = this.state;
-        return pos[edge.to];
+    private getEdgeEnd(edge: Line) {
+        return edge.to;
     }
 
-    private getNodePosition(d) {
+    private getNodePosition(d: NodeItem): number[] {
         const {pos} = this.state;
-        return pos[d['id']];
+        const ret = pos.get(d.id);
+        if (d.id === 'a') {
+            console.info('getNodePosition', ret);
+        }
+        return ret;
     }
 
     private onWheel(e: React.MouseEvent<HTMLElement>) {
@@ -310,15 +322,10 @@ export class Graph extends React.Component<Props, State> {
     }
 
     private drag(e: React.MouseEvent<HTMLElement>) {
-        /**
-         * TODO
-         *
-         * fix ratios when moving
-         */
         const {dragging, currentNode, zoom} = this.state;
         if (dragging) {
             e.preventDefault();
-            const {tmpMouse: {x, y}, offset, pos} = this.state;
+            const {tmpMouse: {x, y}, offset} = this.state;
             const dx = (x - e.screenX);
             const dy = (y - e.screenY);
             if (!currentNode) {
@@ -335,23 +342,32 @@ export class Graph extends React.Component<Props, State> {
                 });
             }
             else {
-                const nodePos = pos[currentNode.id];
+                const {graphEdges, graphLoops, pos} = this.state;
+                const nodePos = pos.get(currentNode.id);
                 const newPos = [(nodePos[0] - dx / zoom), (nodePos[1] - dy / zoom), 0];
-                pos[currentNode.id] = newPos;
+                pos.set(currentNode.id, newPos);
                 this.setState({
                     ...this.state,
-                    pos: {...pos},
+                    pos: pos,
                     tmpMouse: {
                         x: e.screenX,
                         y: e.screenY,
                     },
+                    lines: this.getEdgeLines(graphEdges, pos),
+                    loops: this.getLoopLines(graphLoops, pos),
                 });
             }
         }
     }
 
-    private makeTree() {
+    private makeTree(nodes: NodeItem[], edges: NodeLink[]) {
         const {pos} = this.state;
+        const loops = edges.filter(edge => {
+            return edge.to === edge.from;
+        });
+        const lines = edges.filter(edge => {
+            return edge.to !== edge.from;
+        });
         const map = nodes.map(node => {
             const parent = edges.filter(edge => {
                 return edge.to === node.id;
@@ -372,12 +388,42 @@ export class Graph extends React.Component<Props, State> {
         layout(root);
         const p = root.descendants();
         p.forEach((n => {
-            pos[n.data.id] = [n['x'], n['y'], 0];
+            pos.set(n.data.id, [n['x'], n['y'], 0]);
         }));
+
         this.setState({
             ...this.state,
             initialised: true,
             pos: pos,
+            graphEdges: lines,
+            graphLoops: loops,
+            lines: this.getEdgeLines(lines, pos),
+            loops: this.getLoopLines(loops, pos),
+        });
+    }
+
+    private getLoopLines(loops: NodeLink[], pos: PosMap): Line[] {
+        const sLoops: Line[] = [];
+        loops.forEach(loop => {
+            const lPos = pos.get(loop.from);
+            sLoops.push({
+                from: lPos,
+                to: [lPos[0] + loopSize, lPos[1] - loopSize, 0],
+            });
+            sLoops.push({
+                to: lPos,
+                from: [lPos[0] + loopSize, lPos[1] - loopSize, 0],
+            });
+        });
+        return sLoops;
+    }
+
+    private getEdgeLines(lines: NodeLink[], pos: PosMap): Line[] {
+        return lines.map(line => {
+            return {
+                from: pos.get(line.from),
+                to: pos.get(line.to),
+            };
         });
     }
 }
