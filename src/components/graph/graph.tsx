@@ -73,7 +73,7 @@ export class Graph extends React.Component<Props, State> {
                 height: height,
             },
             initialised: false,
-            zoom: 2,
+            zoom: 1,
             pos: {},
         };
     }
@@ -86,15 +86,24 @@ export class Graph extends React.Component<Props, State> {
         const {offset: {x, y}, size: {width, height}, zoom, initialised} = this.state;
         if (initialised === true) {
             const layers = [this.createEdgesLayer(), this.createNodesLayer(), this.createArrowLayer()];
+            const left = ((-width / 2) + x);
+            const top = ((-height / 2) + y);
             const vOpt = {
-                left: (-width / zoom) + x / zoom,
-                top: (-height / zoom) + y / zoom,
-                right: (width / zoom) + x / zoom,
-                bottom: (height / zoom) + y / zoom,
+                left: left / zoom,
+                top: top / zoom,
+                right: (left + width) / zoom,
+                bottom: (top + height) / zoom,
+                width: width,
+                height: height,
                 near: 0,
-                far: 100,
+                far: 1000,
+            };
+            const viewState = {
+                eye: [0, 0, 1],
+                lookAt: [0, 0, 0],
             };
             const view = new OrthographicView(vOpt);
+            console.info(x, y, zoom, view.makeViewport({width, height, viewState}), vOpt);
             return (
                 <div
                     onWheel={(e) => this.onWheel(e)}
@@ -108,6 +117,7 @@ export class Graph extends React.Component<Props, State> {
                         height={height}
                         views={view}
                         layers={layers}
+                        viewState={viewState}
                     />
                 </div>
             );
