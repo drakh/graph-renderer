@@ -73,4 +73,12 @@ export const edges = [
         from: 'a',
         to: 'f',
     },
+    {
+        from: 'f',
+        to: 'c',
+    },
+    {
+        from: 'f',
+        to: 'a',
+    },
 ];
