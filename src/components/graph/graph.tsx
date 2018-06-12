@@ -8,7 +8,6 @@ import DeckGL, {
 } from 'deck.gl';
 import { BezierCurveLayer } from '@deck.gl/experimental-layers';
 import {
-    computeAngle,
     interpolateQuadraticBezier,
     interpolateQuadraticBezierAngle,
 } from 'common/utils';
@@ -73,7 +72,7 @@ export class Graph extends React.Component<Props, State> {
                 height: height,
             },
             initialised: false,
-            zoom: 1,
+            zoom: 3,
             pos: {},
         };
     }
@@ -226,7 +225,7 @@ export class Graph extends React.Component<Props, State> {
                 getPosition: positions,
                 getAngle: angles,
             },
-            getSize: 20,
+            getSize: 10,
             getColor: [255, 0, 0],
         });
         return layer;
@@ -258,21 +257,14 @@ export class Graph extends React.Component<Props, State> {
     private getEdgeMid(edge) {
         const {pos} = this.state;
         const source = pos[edge.from];
-        const target = edge.from === edge.to ? [pos[edge.to][0] + 100, pos[edge.to][1] - 100] : pos[edge.to];
-        const direction = source[0] > target[0] ? 1 : -1;
-        const ang = (computeAngle(source, target) - 90) / (180 * Math.PI);
-        const offset = ang * 50;
-        const midPoint = [(source[0] + target[0]) / 2, (source[1] + target[1]) / 2];
-        const dx = target[0] - source[0];
-        const dy = target[1] - source[1];
-        const normal = [dy, -dx];
-        const length = Math.sqrt(Math.pow(normal[0], 2.0) + Math.pow(normal[1], 2.0));
-        const normalized = [normal[0] / length, normal[1] / length];
-        const ret = [
-            midPoint[0] + normalized[0] * offset * direction || 0,
-            midPoint[1] + normalized[1] * offset * direction || 0,
-            0,
-        ];
+        const target = edge.from === edge.to ? [pos[edge.to][0] + 50, pos[edge.to][1] - 50, 0] : pos[edge.to];
+        const dx = (target[0] - source[0]);
+        const dy = (target[1] - source[1]);
+        const adx = Math.abs(dx);
+        const ady = Math.abs(dy);
+        const ax = (adx / 5) * (dx / adx);
+        const ay = (ady / 5) * (dy / ady);
+        const ret = [(adx > ady ? target[0] - ax : source[0] + ax), (adx > ady ? source[1] + ay : target[1] - ay), 0];
         return ret;
     }
 
