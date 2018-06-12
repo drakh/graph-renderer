@@ -1,4 +1,6 @@
-export const nodes = [
+import { NodeItem, NodeLink } from 'common/types';
+
+export const nodes: NodeItem[] = [
     {id: 'a'},
     {id: 'b'},
     {id: 'c'},
@@ -12,7 +14,7 @@ export const nodes = [
     {id: 'm'},
     {id: 'n'},
 ];
-export const edges = [
+export const edges: NodeLink[] = [
     {
         from: 'a',
         to: 'a',
