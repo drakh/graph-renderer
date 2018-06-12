@@ -103,7 +103,6 @@ export class Graph extends React.Component<Props, State> {
                 lookAt: [0, 0, 0],
             };
             const view = new OrthographicView(vOpt);
-            console.info(x, y, zoom, view.makeViewport({width, height, viewState}), vOpt);
             return (
                 <div
                     onWheel={(e) => this.onWheel(e)}
@@ -324,7 +323,7 @@ export class Graph extends React.Component<Props, State> {
          *
          * fix ratios when moving
          */
-        const {dragging, currentNode} = this.state;
+        const {dragging, currentNode, zoom} = this.state;
         if (dragging) {
             e.preventDefault();
             const {tmpMouse: {x, y}, offset, pos} = this.state;
@@ -345,7 +344,7 @@ export class Graph extends React.Component<Props, State> {
             }
             else {
                 const nodePos = pos[currentNode.id];
-                const newPos = [(nodePos[0] - dx), (nodePos[1] - dy), 0];
+                const newPos = [(nodePos[0] - dx / zoom), (nodePos[1] - dy / zoom), 0];
                 pos[currentNode.id] = newPos;
                 this.setState({
                     ...this.state,
